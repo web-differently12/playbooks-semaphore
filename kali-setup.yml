@@ -1,0 +1,175 @@
+---
+- hosts: kali
+
+  tasks:
+    - name: Update and upgrade apt packages
+      become: true
+      apt:
+        upgrade: yes
+        update_cache: yes
+        cache_valid_time: 86400 #One day
+
+    - name: Get user name
+      shell: whoami
+      register: user_name
+
+    - name: Get user desktop folder
+      shell: xdg-user-dir DESKTOP
+      register: user_desktop
+
+    - name: Get architecture
+      shell: |
+        archi=$(uname -m)
+        if [ "${archi}" = "aarch64" ]
+        then
+            echo "arm64"
+        elif [ "${archi}" = "arm64" ]
+        then
+            echo "arm64"
+        else
+            echo "x64"
+        fi
+      register: arch
+
+    - name: Get Virtual Env
+      shell: systemd-detect-virt | awk '{print tolower($0)}'
+      register: virt_env
+
+    - name: Debug variables
+      debug:
+        msg: 
+          - "user_name: {{ user_name.stdout }}"
+          - "user_desktop: {{ user_desktop.stdout }}"
+          - "arch: {{ arch.stdout }}"
+          - "virt_env: {{ virt_env.stdout }}"
+
+    - name: Install vscode
+      become: true
+      apt: 
+        deb: "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-{{ arch.stdout }}" 
+
+    - name: Install packages
+      become: true
+      apt:
+        name: 
+          - ncdu
+          - terminator
+          - seclists
+          - feroxbuster
+          - gobuster
+          - python3-pip
+          - python3.11-venv
+          - burpsuite
+          - golang-go
+        state: present
+
+    - name: Create terminator config folder
+      file:
+        path: "~/.config/terminator"
+        state: directory
+
+    - name: Copy terminator config file
+      copy:
+        src: "terminator_config"
+        dest: "~/.config/terminator/config"
+
+    - name: Unpack rockyou
+      become: true
+      shell: gunzip -d /usr/share/wordlists/rockyou.txt.gz
+      ignore_errors: yes
+
+    # - name: Copy .zshrc
+    #   copy:
+    #     src: ".zshrc"
+    #     dest: "~/.zshrc"
+
+    - name: Add pipx path
+      lineinfile:
+        dest: "~/.zshrc"
+        line: 'export PATH="$PATH:/home/{{ user_name.stdout }}/.local/bin"'
+
+    - name: Install pwncat-cs
+      shell: |
+        python3 -m pip install --user pipx
+        export PATH="$PATH:/home/{{ user_name.stdout }}/.local/bin"
+        pipx install pwncat-cs
+
+    - name: Setting VIM
+      become: true
+      copy:
+        dest: "{{ item }}"
+        content: |
+          source $VIMRUNTIME/defaults.vim
+          set mouse-=a
+      with_items:
+        - "/home/{{ user_name.stdout }}/.vimrc"
+        - "/root/.vimrc"
+
+    - name: Copy scripts
+      become: true
+      copy:
+        src: "{{ item }}"
+        dest: "/usr/local/bin/"
+        mode: "+x"
+      with_items:
+        - "upload"
+        - "monip"
+        - "nmaper"
+        - "vpnchoice"
+
+    - name: Create vpnchoice folder
+      file:
+        path: "~/ovpn_files"
+        state: directory
+    
+    - name: Install simple-term-menu
+      become: true
+      shell: python3 -m pip install simple-term-menu
+
+    # - name: Copy arm burpsuite script
+    #   become: true
+    #   copy:
+    #     src: "burpsuite"
+    #     dest: "/usr/local/bin/"
+    #     mode: "+x"
+    #   when: ansible_architecture == 'aarch64' or ansible_architecture == 'arm64'
+    
+    # - name: Install arm burpsuite
+    #   become: true
+    #   shell: /usr/local/bin/burpsuite -u
+    #   when: ansible_architecture == 'aarch64' or ansible_architecture == 'arm64'
+
+    - name: Create Tools folder
+      file:
+        path: "~/Tools"
+        state: directory
+
+    - name: Get Tools script
+      get_url: 
+        url: "https://raw.githubusercontent.com/ThePorgs/Exegol-resources/main/update-resources.sh" 
+        dest: "~/Tools/"
+        mode: "+x"
+
+    - name: Install Tools
+      shell: |
+        cd ~/Tools/
+        ./update-resources.sh
+
+    - name: Install resizer
+      copy:
+        src: "{{ item }}"
+        dest: "{{ user_desktop.stdout }}"
+        mode: "+x"
+      with_items:
+        - "medium.sh"
+        - "high.sh"
+        - "auto.sh"
+      when: virt_env.stdout == "qemu" or virt_env.stdout == "vmware"
+
+    - name: Install ligolo-ng
+      become: true
+      shell: |
+        git clone https://github.com/nicocha30/ligolo-ng /opt/ligolo-ng
+        cd /opt/ligolo-ng
+        go build -o agent cmd/agent/main.go
+        go build -o proxy cmd/proxy/main.go
